@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Enhanced Trae-Godot MCP Server
+ * Enhanced Trae-Godot MCP Server v2.1
  * 
  * This MCP server provides real-time tools for interacting with the Godot game engine.
- * It connects to a Godot Editor plugin via WebSocket for live scene editing,
- * script modification, and debugging.
+ * It connects to a Godot Editor plugin via TCP for live scene editing,
+ * script modification, debugging, and AI-assisted development.
  * 
  * Features:
  * - Real-time scene tree viewing and editing
@@ -12,16 +12,17 @@
  * - Node property modification
  * - Project execution control
  * - Debug output capture
+ * - Resource management
+ * - Performance monitoring
+ * - Code quality analysis
+ * - Search and replace
  * 
  * @author xinyuzjj
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 import { fileURLToPath } from 'url';
-import { join, dirname, basename, normalize, resolve } from 'path';
-import { existsSync, readdirSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
-import { spawn, execFile } from 'child_process';
-import { promisify } from 'util';
+import { dirname } from 'path';
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -33,11 +34,6 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 
 import { GodotBridge } from './godot-bridge.js';
-
-const execFileAsync = promisify(execFile);
-
-// Debug mode configuration
-const DEBUG_MODE: boolean = process.env.DEBUG === 'true';
 
 // Derive __filename and __dirname in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -60,7 +56,6 @@ interface ToolResult {
 class TraeGodotServer {
   private server: Server;
   private godotBridge: GodotBridge;
-  private godotPath: string | null = null;
 
   constructor() {
     // Initialize Godot Bridge
@@ -71,7 +66,7 @@ class TraeGodotServer {
     this.server = new Server(
       {
         name: 'trae-godot-mcp',
-        version: '2.0.0',
+        version: '2.1.0',
       },
       {
         capabilities: {
@@ -106,7 +101,6 @@ class TraeGodotServer {
     });
 
     this.godotBridge.on('notification', (data: any) => {
-      // Handle notifications from Godot (e.g., selection changes)
       console.error('[TraeGodotServer] Notification from Godot:', data);
     });
   }
@@ -120,57 +114,32 @@ class TraeGodotServer {
     }
   }
 
-  private logDebug(message: string): void {
-    if (DEBUG_MODE) {
-      console.error(`[DEBUG] ${message}`);
-    }
-  }
-
   private createErrorResponse(message: string, details?: string): ToolResult {
     console.error(`[SERVER] Error: ${message}`);
-
     const response: ToolResult = {
-      content: [
-        {
-          type: 'text',
-          text: message,
-        },
-      ],
+      content: [{ type: 'text', text: message }],
       isError: true,
     };
-
     if (details) {
-      response.content.push({
-        type: 'text',
-        text: details,
-      });
+      response.content.push({ type: 'text', text: details });
     }
-
     return response;
   }
 
   private createSuccessResponse(message: string, data?: any): ToolResult {
     const response: ToolResult = {
-      content: [
-        {
-          type: 'text',
-          text: message,
-        },
-      ],
+      content: [{ type: 'text', text: message }],
     };
-
     if (data !== undefined) {
       response.content.push({
         type: 'text',
         text: typeof data === 'string' ? data : JSON.stringify(data, null, 2),
       });
     }
-
     return response;
   }
 
   private async cleanup(): Promise<void> {
-    this.logDebug('Cleaning up resources');
     this.godotBridge.disconnect();
     await this.server.close();
   }
@@ -186,21 +155,18 @@ class TraeGodotServer {
         {
           name: 'check_godot_connection',
           description: 'Check if connected to Godot Editor',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        {
+          name: 'get_connection_status',
+          description: 'Get detailed connection status including Godot version',
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
         // Scene Tree Operations
         {
           name: 'get_scene_tree',
           description: 'Get the current scene tree structure from Godot Editor',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
         {
           name: 'get_node_properties',
@@ -208,10 +174,7 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              nodePath: {
-                type: 'string',
-                description: 'Path to the node (e.g., "root/Player/Sprite2D")',
-              },
+              nodePath: { type: 'string', description: 'Path to the node' },
             },
             required: ['nodePath'],
           },
@@ -222,17 +185,9 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              nodePath: {
-                type: 'string',
-                description: 'Path to the node',
-              },
-              property: {
-                type: 'string',
-                description: 'Property name',
-              },
-              value: {
-                description: 'Property value (any type)',
-              },
+              nodePath: { type: 'string', description: 'Path to the node' },
+              property: { type: 'string', description: 'Property name' },
+              value: { description: 'Property value' },
             },
             required: ['nodePath', 'property', 'value'],
           },
@@ -240,11 +195,7 @@ class TraeGodotServer {
         {
           name: 'get_selected_nodes',
           description: 'Get currently selected nodes in Godot Editor',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
         {
           name: 'select_node',
@@ -252,10 +203,7 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              nodePath: {
-                type: 'string',
-                description: 'Path to the node to select',
-              },
+              nodePath: { type: 'string', description: 'Path to the node' },
             },
             required: ['nodePath'],
           },
@@ -267,10 +215,7 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              scriptPath: {
-                type: 'string',
-                description: 'Path to the script file (e.g., "res://scripts/player.gd")',
-              },
+              scriptPath: { type: 'string', description: 'Path to the script file' },
             },
             required: ['scriptPath'],
           },
@@ -281,14 +226,8 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              scriptPath: {
-                type: 'string',
-                description: 'Path to the script file',
-              },
-              content: {
-                type: 'string',
-                description: 'New script content',
-              },
+              scriptPath: { type: 'string', description: 'Path to the script' },
+              content: { type: 'string', description: 'New script content' },
             },
             required: ['scriptPath', 'content'],
           },
@@ -300,18 +239,9 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              parentPath: {
-                type: 'string',
-                description: 'Path to the parent node (default: root)',
-              },
-              nodeType: {
-                type: 'string',
-                description: 'Type of node to create (e.g., "Sprite2D", "CharacterBody2D")',
-              },
-              nodeName: {
-                type: 'string',
-                description: 'Name for the new node',
-              },
+              parentPath: { type: 'string', description: 'Parent node path' },
+              nodeType: { type: 'string', description: 'Node type (e.g., Sprite2D)' },
+              nodeName: { type: 'string', description: 'Name for the new node' },
             },
             required: ['nodeType', 'nodeName'],
           },
@@ -322,10 +252,7 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              nodePath: {
-                type: 'string',
-                description: 'Path to the node to delete',
-              },
+              nodePath: { type: 'string', description: 'Path to the node' },
             },
             required: ['nodePath'],
           },
@@ -336,127 +263,254 @@ class TraeGodotServer {
           inputSchema: {
             type: 'object',
             properties: {
-              nodePath: {
-                type: 'string',
-                description: 'Path to the node to duplicate',
-              },
+              nodePath: { type: 'string', description: 'Path to the node' },
             },
             required: ['nodePath'],
+          },
+        },
+        {
+          name: 'rename_node',
+          description: 'Rename a node',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              nodePath: { type: 'string', description: 'Path to the node' },
+              newName: { type: 'string', description: 'New name' },
+            },
+            required: ['nodePath', 'newName'],
+          },
+        },
+        {
+          name: 'reparent_node',
+          description: 'Move a node to a different parent',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              nodePath: { type: 'string', description: 'Path to the node' },
+              newParentPath: { type: 'string', description: 'New parent path' },
+            },
+            required: ['nodePath', 'newParentPath'],
           },
         },
         // Project Control
         {
           name: 'run_project',
           description: 'Run the current Godot project',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
         {
           name: 'stop_project',
           description: 'Stop the running Godot project',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
         {
           name: 'save_scene',
           description: 'Save the current scene',
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        {
+          name: 'save_all_scenes',
+          description: 'Save all open scenes',
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        // Resource Management
+        {
+          name: 'import_asset',
+          description: 'Import an asset into the project',
           inputSchema: {
             type: 'object',
-            properties: {},
-            required: [],
+            properties: {
+              sourcePath: { type: 'string', description: 'Source file path' },
+              targetPath: { type: 'string', description: 'Target path in project' },
+            },
+            required: ['sourcePath', 'targetPath'],
           },
         },
         {
-          name: 'reload_scene',
-          description: 'Reload the current scene',
+          name: 'get_resource_info',
+          description: 'Get information about a resource',
           inputSchema: {
             type: 'object',
-            properties: {},
-            required: [],
+            properties: {
+              resourcePath: { type: 'string', description: 'Resource path' },
+            },
+            required: ['resourcePath'],
           },
         },
-        // Debug
+        // Scene Management
+        {
+          name: 'create_new_scene',
+          description: 'Create a new scene file',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              scenePath: { type: 'string', description: 'Path for the new scene' },
+            },
+            required: ['scenePath'],
+          },
+        },
+        {
+          name: 'switch_scene',
+          description: 'Switch to a different scene',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              scenePath: { type: 'string', description: 'Scene file path' },
+            },
+            required: ['scenePath'],
+          },
+        },
+        {
+          name: 'get_open_scenes',
+          description: 'Get list of open scenes',
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        // Debug Tools
         {
           name: 'get_debug_output',
-          description: 'Get the debug output from the running project',
+          description: 'Get debug output from the running project',
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        {
+          name: 'capture_screenshot',
+          description: 'Capture a screenshot of the game',
           inputSchema: {
             type: 'object',
-            properties: {},
-            required: [],
+            properties: {
+              outputPath: { type: 'string', description: 'Output file path' },
+            },
+            required: ['outputPath'],
           },
         },
         {
-          name: 'get_errors',
-          description: 'Get compilation errors and warnings',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-            required: [],
-          },
+          name: 'get_performance_stats',
+          description: 'Get performance statistics (FPS, memory, draw calls)',
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
-        // File Browser
+        // Project Management
         {
           name: 'get_project_files',
           description: 'List files in the project directory',
           inputSchema: {
             type: 'object',
             properties: {
-              directory: {
-                type: 'string',
-                description: 'Directory path (default: "res://")',
-              },
+              directory: { type: 'string', description: 'Directory path' },
             },
             required: [],
           },
+        },
+        {
+          name: 'get_project_stats',
+          description: 'Get project statistics (scripts, scenes, resources count)',
+          inputSchema: { type: 'object', properties: {}, required: [] },
+        },
+        {
+          name: 'check_code_quality',
+          description: 'Check code quality of a script',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              scriptPath: { type: 'string', description: 'Script file path' },
+            },
+            required: ['scriptPath'],
+          },
+        },
+        // Utility Tools
+        {
+          name: 'search_in_files',
+          description: 'Search for text in project files',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              searchPattern: { type: 'string', description: 'Text to search' },
+              directory: { type: 'string', description: 'Directory to search' },
+              fileExtensions: { type: 'array', description: 'File extensions to search' },
+            },
+            required: ['searchPattern'],
+          },
+        },
+        {
+          name: 'replace_in_files',
+          description: 'Replace text in project files',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              searchPattern: { type: 'string', description: 'Text to search' },
+              replaceText: { type: 'string', description: 'Replacement text' },
+              directory: { type: 'string', description: 'Directory' },
+              fileExtensions: { type: 'array', description: 'File extensions' },
+            },
+            required: ['searchPattern', 'replaceText'],
+          },
+        },
+        {
+          name: 'batch_set_property',
+          description: 'Set property on multiple nodes at once',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              nodePaths: { type: 'array', description: 'Array of node paths' },
+              property: { type: 'string', description: 'Property name' },
+              value: { description: 'Property value' },
+            },
+            required: ['nodePaths', 'property', 'value'],
+          },
+        },
+        {
+          name: 'get_operation_log',
+          description: 'Get operation history log',
+          inputSchema: { type: 'object', properties: {}, required: [] },
         },
       ],
     }));
 
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      this.logDebug(`Handling tool request: ${request.params.name}`);
-
       let result: ToolResult;
       try {
+        const args = request.params.arguments || {};
         switch (request.params.name) {
           case 'check_godot_connection':
             result = await this.handleCheckConnection();
+            break;
+          case 'get_connection_status':
+            result = await this.handleGetConnectionStatus();
             break;
           case 'get_scene_tree':
             result = await this.handleGetSceneTree();
             break;
           case 'get_node_properties':
-            result = await this.handleGetNodeProperties(request.params.arguments);
+            result = await this.handleGetNodeProperties(args);
             break;
           case 'set_node_property':
-            result = await this.handleSetNodeProperty(request.params.arguments);
+            result = await this.handleSetNodeProperty(args);
             break;
           case 'get_selected_nodes':
             result = await this.handleGetSelectedNodes();
             break;
           case 'select_node':
-            result = await this.handleSelectNode(request.params.arguments);
+            result = await this.handleSelectNode(args);
             break;
           case 'get_script_content':
-            result = await this.handleGetScriptContent(request.params.arguments);
+            result = await this.handleGetScriptContent(args);
             break;
           case 'set_script_content':
-            result = await this.handleSetScriptContent(request.params.arguments);
+            result = await this.handleSetScriptContent(args);
             break;
           case 'create_node':
-            result = await this.handleCreateNode(request.params.arguments);
+            result = await this.handleCreateNode(args);
             break;
           case 'delete_node':
-            result = await this.handleDeleteNode(request.params.arguments);
+            result = await this.handleDeleteNode(args);
             break;
           case 'duplicate_node':
-            result = await this.handleDuplicateNode(request.params.arguments);
+            result = await this.handleDuplicateNode(args);
+            break;
+          case 'rename_node':
+            result = await this.handleRenameNode(args);
+            break;
+          case 'reparent_node':
+            result = await this.handleReparentNode(args);
             break;
           case 'run_project':
             result = await this.handleRunProject();
@@ -467,34 +521,62 @@ class TraeGodotServer {
           case 'save_scene':
             result = await this.handleSaveScene();
             break;
-          case 'reload_scene':
-            result = await this.handleReloadScene();
+          case 'save_all_scenes':
+            result = await this.handleSaveAllScenes();
+            break;
+          case 'import_asset':
+            result = await this.handleImportAsset(args);
+            break;
+          case 'get_resource_info':
+            result = await this.handleGetResourceInfo(args);
+            break;
+          case 'create_new_scene':
+            result = await this.handleCreateNewScene(args);
+            break;
+          case 'switch_scene':
+            result = await this.handleSwitchScene(args);
+            break;
+          case 'get_open_scenes':
+            result = await this.handleGetOpenScenes();
             break;
           case 'get_debug_output':
             result = await this.handleGetDebugOutput();
             break;
-          case 'get_errors':
-            result = await this.handleGetErrors();
+          case 'capture_screenshot':
+            result = await this.handleCaptureScreenshot(args);
+            break;
+          case 'get_performance_stats':
+            result = await this.handleGetPerformanceStats();
             break;
           case 'get_project_files':
-            result = await this.handleGetProjectFiles(request.params.arguments);
+            result = await this.handleGetProjectFiles(args);
+            break;
+          case 'get_project_stats':
+            result = await this.handleGetProjectStats();
+            break;
+          case 'check_code_quality':
+            result = await this.handleCheckCodeQuality(args);
+            break;
+          case 'search_in_files':
+            result = await this.handleSearchInFiles(args);
+            break;
+          case 'replace_in_files':
+            result = await this.handleReplaceInFiles(args);
+            break;
+          case 'batch_set_property':
+            result = await this.handleBatchSetProperty(args);
+            break;
+          case 'get_operation_log':
+            result = await this.handleGetOperationLog();
             break;
           default:
-            throw new McpError(
-              ErrorCode.MethodNotFound,
-              `Unknown tool: ${request.params.name}`
-            );
+            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${request.params.name}`);
         }
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
         result = this.createErrorResponse(`Tool execution failed: ${errorMessage}`);
       }
-
-      return {
-        content: result.content,
-        isError: result.isError,
-        _meta: result._meta,
-      };
+      return { content: result.content, isError: result.isError, _meta: result._meta };
     });
   }
 
@@ -504,22 +586,23 @@ class TraeGodotServer {
 
   private async handleCheckConnection(): Promise<ToolResult> {
     const isConnected = this.godotBridge.getConnectionStatus();
-    if (isConnected) {
-      return this.createSuccessResponse('Connected to Godot Editor');
-    } else {
-      return this.createErrorResponse(
-        'Not connected to Godot Editor',
-        'Make sure the Trae MCP plugin is installed and enabled in Godot Editor.\n' +
-        '1. Copy the plugin to your Godot project\'s addons folder\n' +
-        '2. Enable "Trae MCP Integration" in Project Settings > Plugins\n' +
-        '3. Restart Godot Editor'
-      );
+    return isConnected
+      ? this.createSuccessResponse('Connected to Godot Editor')
+      : this.createErrorResponse('Not connected to Godot Editor', 'Make sure the Trae MCP plugin is installed and enabled');
+  }
+
+  private async handleGetConnectionStatus(): Promise<ToolResult> {
+    try {
+      const result = await this.godotBridge.sendCommand('get_connection_status');
+      return this.createSuccessResponse('Connection status:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to get connection status', error.message);
     }
   }
 
   private async handleGetSceneTree(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.getSceneTree();
+      const result = await this.godotBridge.sendCommand('get_scene_tree');
       return this.createSuccessResponse('Scene tree retrieved:', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to get scene tree', error.message);
@@ -527,13 +610,10 @@ class TraeGodotServer {
   }
 
   private async handleGetNodeProperties(args: any): Promise<ToolResult> {
-    if (!args.nodePath) {
-      return this.createErrorResponse('nodePath is required');
-    }
-
+    if (!args.nodePath) return this.createErrorResponse('nodePath is required');
     try {
-      const result = await this.godotBridge.getNodeProperties(args.nodePath);
-      return this.createSuccessResponse(`Properties for node '${args.nodePath}':`, result);
+      const result = await this.godotBridge.sendCommand('get_node_properties', { node_path: args.nodePath });
+      return this.createSuccessResponse(`Properties for '${args.nodePath}':`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to get node properties', error.message);
     }
@@ -543,17 +623,13 @@ class TraeGodotServer {
     if (!args.nodePath || !args.property || args.value === undefined) {
       return this.createErrorResponse('nodePath, property, and value are required');
     }
-
     try {
-      const result = await this.godotBridge.setNodeProperty(
-        args.nodePath,
-        args.property,
-        args.value
-      );
-      return this.createSuccessResponse(
-        `Property '${args.property}' set on '${args.nodePath}'`,
-        result
-      );
+      const result = await this.godotBridge.sendCommand('set_node_property', {
+        node_path: args.nodePath,
+        property: args.property,
+        value: args.value,
+      });
+      return this.createSuccessResponse(`Property '${args.property}' set on '${args.nodePath}'`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to set node property', error.message);
     }
@@ -561,7 +637,7 @@ class TraeGodotServer {
 
   private async handleGetSelectedNodes(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.getSelectedNodes();
+      const result = await this.godotBridge.sendCommand('get_selected_nodes');
       return this.createSuccessResponse('Selected nodes:', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to get selected nodes', error.message);
@@ -569,12 +645,9 @@ class TraeGodotServer {
   }
 
   private async handleSelectNode(args: any): Promise<ToolResult> {
-    if (!args.nodePath) {
-      return this.createErrorResponse('nodePath is required');
-    }
-
+    if (!args.nodePath) return this.createErrorResponse('nodePath is required');
     try {
-      const result = await this.godotBridge.selectNode(args.nodePath);
+      const result = await this.godotBridge.sendCommand('select_node', { node_path: args.nodePath });
       return this.createSuccessResponse(`Node '${args.nodePath}' selected`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to select node', error.message);
@@ -582,12 +655,9 @@ class TraeGodotServer {
   }
 
   private async handleGetScriptContent(args: any): Promise<ToolResult> {
-    if (!args.scriptPath) {
-      return this.createErrorResponse('scriptPath is required');
-    }
-
+    if (!args.scriptPath) return this.createErrorResponse('scriptPath is required');
     try {
-      const result = await this.godotBridge.getScriptContent(args.scriptPath);
+      const result = await this.godotBridge.sendCommand('get_script_content', { script_path: args.scriptPath });
       return this.createSuccessResponse(`Script content for '${args.scriptPath}':`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to get script content', error.message);
@@ -598,9 +668,11 @@ class TraeGodotServer {
     if (!args.scriptPath || !args.content) {
       return this.createErrorResponse('scriptPath and content are required');
     }
-
     try {
-      const result = await this.godotBridge.setScriptContent(args.scriptPath, args.content);
+      const result = await this.godotBridge.sendCommand('set_script_content', {
+        script_path: args.scriptPath,
+        content: args.content,
+      });
       return this.createSuccessResponse(`Script '${args.scriptPath}' updated`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to set script content', error.message);
@@ -611,29 +683,22 @@ class TraeGodotServer {
     if (!args.nodeType || !args.nodeName) {
       return this.createErrorResponse('nodeType and nodeName are required');
     }
-
     try {
-      const result = await this.godotBridge.createNode(
-        args.parentPath || 'root',
-        args.nodeType,
-        args.nodeName
-      );
-      return this.createSuccessResponse(
-        `Node '${args.nodeName}' of type '${args.nodeType}' created`,
-        result
-      );
+      const result = await this.godotBridge.sendCommand('create_node', {
+        parent_path: args.parentPath || '',
+        node_type: args.nodeType,
+        node_name: args.nodeName,
+      });
+      return this.createSuccessResponse(`Node '${args.nodeName}' created`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to create node', error.message);
     }
   }
 
   private async handleDeleteNode(args: any): Promise<ToolResult> {
-    if (!args.nodePath) {
-      return this.createErrorResponse('nodePath is required');
-    }
-
+    if (!args.nodePath) return this.createErrorResponse('nodePath is required');
     try {
-      const result = await this.godotBridge.deleteNode(args.nodePath);
+      const result = await this.godotBridge.sendCommand('delete_node', { node_path: args.nodePath });
       return this.createSuccessResponse(`Node '${args.nodePath}' deleted`, result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to delete node', error.message);
@@ -641,10 +706,7 @@ class TraeGodotServer {
   }
 
   private async handleDuplicateNode(args: any): Promise<ToolResult> {
-    if (!args.nodePath) {
-      return this.createErrorResponse('nodePath is required');
-    }
-
+    if (!args.nodePath) return this.createErrorResponse('nodePath is required');
     try {
       const result = await this.godotBridge.sendCommand('duplicate_node', { node_path: args.nodePath });
       return this.createSuccessResponse(`Node '${args.nodePath}' duplicated`, result);
@@ -653,9 +715,39 @@ class TraeGodotServer {
     }
   }
 
+  private async handleRenameNode(args: any): Promise<ToolResult> {
+    if (!args.nodePath || !args.newName) {
+      return this.createErrorResponse('nodePath and newName are required');
+    }
+    try {
+      const result = await this.godotBridge.sendCommand('rename_node', {
+        node_path: args.nodePath,
+        new_name: args.newName,
+      });
+      return this.createSuccessResponse(`Node renamed to '${args.newName}'`, result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to rename node', error.message);
+    }
+  }
+
+  private async handleReparentNode(args: any): Promise<ToolResult> {
+    if (!args.nodePath || !args.newParentPath) {
+      return this.createErrorResponse('nodePath and newParentPath are required');
+    }
+    try {
+      const result = await this.godotBridge.sendCommand('reparent_node', {
+        node_path: args.nodePath,
+        new_parent_path: args.newParentPath,
+      });
+      return this.createSuccessResponse(`Node reparented to '${args.newParentPath}'`, result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to reparent node', error.message);
+    }
+  }
+
   private async handleRunProject(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.runProject();
+      const result = await this.godotBridge.sendCommand('run_project');
       return this.createSuccessResponse('Project is running', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to run project', error.message);
@@ -664,7 +756,7 @@ class TraeGodotServer {
 
   private async handleStopProject(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.stopProject();
+      const result = await this.godotBridge.sendCommand('stop_project');
       return this.createSuccessResponse('Project stopped', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to stop project', error.message);
@@ -673,46 +765,185 @@ class TraeGodotServer {
 
   private async handleSaveScene(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.saveScene();
+      const result = await this.godotBridge.sendCommand('save_scene');
       return this.createSuccessResponse('Scene saved', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to save scene', error.message);
     }
   }
 
-  private async handleReloadScene(): Promise<ToolResult> {
+  private async handleSaveAllScenes(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.sendCommand('reload_scene');
-      return this.createSuccessResponse('Scene reloaded', result);
+      const result = await this.godotBridge.sendCommand('save_all_scenes');
+      return this.createSuccessResponse('All scenes saved', result);
     } catch (error: any) {
-      return this.createErrorResponse('Failed to reload scene', error.message);
+      return this.createErrorResponse('Failed to save all scenes', error.message);
+    }
+  }
+
+  private async handleImportAsset(args: any): Promise<ToolResult> {
+    if (!args.sourcePath || !args.targetPath) {
+      return this.createErrorResponse('sourcePath and targetPath are required');
+    }
+    try {
+      const result = await this.godotBridge.sendCommand('import_asset', {
+        source_path: args.sourcePath,
+        target_path: args.targetPath,
+      });
+      return this.createSuccessResponse('Asset imported', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to import asset', error.message);
+    }
+  }
+
+  private async handleGetResourceInfo(args: any): Promise<ToolResult> {
+    if (!args.resourcePath) return this.createErrorResponse('resourcePath is required');
+    try {
+      const result = await this.godotBridge.sendCommand('get_resource_info', { resource_path: args.resourcePath });
+      return this.createSuccessResponse('Resource info:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to get resource info', error.message);
+    }
+  }
+
+  private async handleCreateNewScene(args: any): Promise<ToolResult> {
+    if (!args.scenePath) return this.createErrorResponse('scenePath is required');
+    try {
+      const result = await this.godotBridge.sendCommand('create_new_scene', { scene_path: args.scenePath });
+      return this.createSuccessResponse('New scene created', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to create scene', error.message);
+    }
+  }
+
+  private async handleSwitchScene(args: any): Promise<ToolResult> {
+    if (!args.scenePath) return this.createErrorResponse('scenePath is required');
+    try {
+      const result = await this.godotBridge.sendCommand('switch_scene', { scene_path: args.scenePath });
+      return this.createSuccessResponse('Scene switched', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to switch scene', error.message);
+    }
+  }
+
+  private async handleGetOpenScenes(): Promise<ToolResult> {
+    try {
+      const result = await this.godotBridge.sendCommand('get_open_scenes');
+      return this.createSuccessResponse('Open scenes:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to get open scenes', error.message);
     }
   }
 
   private async handleGetDebugOutput(): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.getDebugOutput();
+      const result = await this.godotBridge.sendCommand('get_debug_output');
       return this.createSuccessResponse('Debug output:', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to get debug output', error.message);
     }
   }
 
-  private async handleGetErrors(): Promise<ToolResult> {
+  private async handleCaptureScreenshot(args: any): Promise<ToolResult> {
+    if (!args.outputPath) return this.createErrorResponse('outputPath is required');
     try {
-      const result = await this.godotBridge.sendCommand('get_errors');
-      return this.createSuccessResponse('Errors:', result);
+      const result = await this.godotBridge.sendCommand('capture_screenshot', { output_path: args.outputPath });
+      return this.createSuccessResponse('Screenshot captured', result);
     } catch (error: any) {
-      return this.createErrorResponse('Failed to get errors', error.message);
+      return this.createErrorResponse('Failed to capture screenshot', error.message);
+    }
+  }
+
+  private async handleGetPerformanceStats(): Promise<ToolResult> {
+    try {
+      const result = await this.godotBridge.sendCommand('get_performance_stats');
+      return this.createSuccessResponse('Performance stats:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to get performance stats', error.message);
     }
   }
 
   private async handleGetProjectFiles(args: any): Promise<ToolResult> {
     try {
-      const result = await this.godotBridge.getProjectFiles(args.directory || 'res://');
+      const result = await this.godotBridge.sendCommand('get_project_files', { directory: args.directory || 'res://' });
       return this.createSuccessResponse('Project files:', result);
     } catch (error: any) {
       return this.createErrorResponse('Failed to get project files', error.message);
+    }
+  }
+
+  private async handleGetProjectStats(): Promise<ToolResult> {
+    try {
+      const result = await this.godotBridge.sendCommand('get_project_stats');
+      return this.createSuccessResponse('Project stats:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to get project stats', error.message);
+    }
+  }
+
+  private async handleCheckCodeQuality(args: any): Promise<ToolResult> {
+    if (!args.scriptPath) return this.createErrorResponse('scriptPath is required');
+    try {
+      const result = await this.godotBridge.sendCommand('check_code_quality', { script_path: args.scriptPath });
+      return this.createSuccessResponse('Code quality check:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to check code quality', error.message);
+    }
+  }
+
+  private async handleSearchInFiles(args: any): Promise<ToolResult> {
+    if (!args.searchPattern) return this.createErrorResponse('searchPattern is required');
+    try {
+      const result = await this.godotBridge.sendCommand('search_in_files', {
+        search_pattern: args.searchPattern,
+        directory: args.directory || 'res://',
+        file_extensions: args.fileExtensions || ['.gd'],
+      });
+      return this.createSuccessResponse('Search results:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to search in files', error.message);
+    }
+  }
+
+  private async handleReplaceInFiles(args: any): Promise<ToolResult> {
+    if (!args.searchPattern || args.replaceText === undefined) {
+      return this.createErrorResponse('searchPattern and replaceText are required');
+    }
+    try {
+      const result = await this.godotBridge.sendCommand('replace_in_files', {
+        search_pattern: args.searchPattern,
+        replace_text: args.replaceText,
+        directory: args.directory || 'res://',
+        file_extensions: args.fileExtensions || ['.gd'],
+      });
+      return this.createSuccessResponse('Replace completed', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to replace in files', error.message);
+    }
+  }
+
+  private async handleBatchSetProperty(args: any): Promise<ToolResult> {
+    if (!args.nodePaths || !args.property || args.value === undefined) {
+      return this.createErrorResponse('nodePaths, property, and value are required');
+    }
+    try {
+      const result = await this.godotBridge.sendCommand('batch_set_property', {
+        node_paths: args.nodePaths,
+        property: args.property,
+        value: args.value,
+      });
+      return this.createSuccessResponse('Batch property set completed', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to batch set property', error.message);
+    }
+  }
+
+  private async handleGetOperationLog(): Promise<ToolResult> {
+    try {
+      const result = await this.godotBridge.sendCommand('get_operation_log');
+      return this.createSuccessResponse('Operation log:', result);
+    } catch (error: any) {
+      return this.createErrorResponse('Failed to get operation log', error.message);
     }
   }
 
@@ -723,7 +954,7 @@ class TraeGodotServer {
   async run(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Trae Godot MCP server running on stdio');
+    console.error('Trae Godot MCP server v2.1.0 running on stdio');
     console.error('Waiting for Godot Editor connection...');
   }
 }
