@@ -1,0 +1,53 @@
+{
+  "name": "@xinyuzjj/trae-godot-mcp",
+  "version": "2.0.0",
+  "description": "Enhanced MCP server for real-time Godot Editor integration with Trae AI",
+  "keywords": [
+    "godot",
+    "mcp",
+    "ai",
+    "trae",
+    "real-time",
+    "editor",
+    "game-engine",
+    "gamedev"
+  ],
+  "homepage": "https://github.com/xinyuzjj/trae-godot-mcp",
+  "bugs": {
+    "url": "https://github.com/xinyuzjj/trae-godot-mcp/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xinyuzjj/trae-godot-mcp.git"
+  },
+  "license": "MIT",
+  "author": "xinyuzjj",
+  "type": "module",
+  "bin": {
+    "trae-godot-mcp": "./build/index.js"
+  },
+  "files": [
+    "build",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/build.js",
+    "inspector": "npx @modelcontextprotocol/inspector build/index.js",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.24",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
